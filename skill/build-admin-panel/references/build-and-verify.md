@@ -24,16 +24,16 @@ Conventions:
   `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles('admin')`, so nothing in
   this module is reachable without both.
 - Cross-tenant reads inject the relevant models/repositories directly and
-  reuse the existing pagination utility — no need to touch the owner-scoped
+  reuse the existing pagination utility; no need to touch the owner-scoped
   services just to add a list endpoint.
 - Mutations (block/unblock, moderate, soft-delete) should reuse an existing
   owner-scoped service method where the guard already permits `admin` and
   the service bypasses the ownership check for that role. Verify this
-  case-by-case by reading the service, not by assuming consistency — the
+  case-by-case by reading the service, not by assuming consistency: the
   same codebase can have some entities where admin already bypasses
   ownership and others where it doesn't.
 - Every list/detail response must match the envelope contract found during
-  research exactly — this is worth a comment at the top of the module
+  research exactly. This is worth a comment at the top of the module
   reminding future editors what shape is required and why.
 
 ## Frontend skeleton
@@ -48,13 +48,13 @@ Conventions:
   `handleSubmit`, toast on success/error, disable-and-spin the submit button
   while pending).
 - Sidebar grouped by domain (e.g. "People", "Content", "Finance") rather
-  than one flat list — makes the IA legible as the entity count grows past
-  half a dozen.
+  than one flat list, which makes the IA legible as the entity count grows
+  past half a dozen.
 
 ## Gotchas
 
 **The envelope trap.** An admin list handler that returns a shape adjacent
-to — but not exactly — what the response-wrapping middleware expects will
+to, but not exactly, what the response-wrapping middleware expects will
 often still return HTTP 200 with a body that *looks* plausible, just with
 `meta`/pagination data in the wrong place. This fails silently in the
 frontend (pagination controls just don't work) rather than throwing
@@ -63,7 +63,7 @@ raw JSON) before building the rest on the same pattern.
 
 **CORS for every new origin.** A local dev frontend, a deployed frontend,
 and a preview-deployment domain are three different origins. Backend CORS
-config needs each one added explicitly (or a regex for preview URLs) — a
+config needs each one added explicitly (or a regex for preview URLs). A
 "works locally, 400/network-error in production" symptom after deploy is
 almost always this, not a code bug. Test with a real preflight/response
 check (`curl -H "Origin: <origin>" <url> | grep -i access-control`), not
@@ -78,7 +78,7 @@ chunk 404s, so the app never hydrates and appears stuck on a loading
 screen forever. This looks exactly like a broken auth guard. If a
 previously-working local panel suddenly won't get past "Loading…", check
 for 404s on static assets in the browser console before debugging auth
-logic — kill both processes, clear the build output directory, and restart
+logic. Kill both processes, clear the build output directory, and restart
 clean.
 
 **Seed vs. deploy are different operations.** Deploying new backend code
@@ -86,7 +86,7 @@ changes what the server *can* do; it never inserts rows into the database.
 A freshly deployed environment (or a fresh database) has no admin account
 until a seed step runs against that specific database. After a "successful"
 deploy, a login attempt returning "incorrect email or password" is not a
-deploy failure — it means the seed step hasn't run yet against that
+deploy failure: it means the seed step hasn't run yet against that
 environment. Keep these as visibly separate steps in any deployment
 checklist, and confirm login only after explicitly running the seed.
 
@@ -95,8 +95,8 @@ opening a PR that would modify) a repository's default branch commonly
 requires the human's own direct action, even for something as
 low-consequence-looking as registering a new CI workflow file so it can be
 manually dispatched. If blocked here, don't retry through alternate paths
-(a fresh branch, a worktree, editing a different file to the same effect)
-— that's treated as circumventing the same restriction, not solving a
+(a fresh branch, a worktree, editing a different file to the same effect).
+That's treated as circumventing the same restriction, not solving a
 different problem. Explain what's needed and hand back one exact command
 for the human to run themselves.
 
@@ -109,19 +109,19 @@ calling a phase done:
    than guessing values; if the backend needs a database/cache, run it in
    a local container rather than trying to fake it out.
 2. **Seed the first admin account** through the backend's own script/flow.
-   A fresh database has zero users — there is no way to log in until this
+   A fresh database has zero users: there is no way to log in until this
    runs, and it's easy to forget since it's outside the normal edit/build
    loop.
 3. **Drive a real browser.** A curl-only check will report HTTP 200 on the
    HTML shell even when every JavaScript chunk is 404ing and the app never
-   actually renders — it cannot catch a stuck-loading state. Use Playwright
+   actually renders; it cannot catch a stuck-loading state. Use Playwright
    (or equivalent) to:
    - log in with the seeded credentials and assert the post-login URL,
    - sweep every page in the sidebar, asserting each one's heading appears
      and no fullscreen "Loading…" state persists after a short wait,
    - open at least one detail dialog and confirm it populates,
-   - perform at least one real write through the UI (not just a page load)
-     — e.g. toggle a status, save a settings field — and assert the
+   - perform at least one real write through the UI (not just a page load),
+     e.g. toggle a status or save a settings field, and assert the
      success toast/resulting state change,
    - log out and confirm the redirect back to the login page,
    - collect console errors and failed network requests throughout, not
@@ -171,5 +171,5 @@ const { chromium } = require('playwright');
 ```
 
 Run this against `localhost` after each phase, and again against the real
-public URL after any deploy — a working local panel proves nothing about
+public URL after any deploy. A working local panel proves nothing about
 CORS or environment configuration in production.
