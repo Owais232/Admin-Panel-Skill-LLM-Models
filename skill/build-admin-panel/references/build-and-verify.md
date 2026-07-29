@@ -1,175 +1,138 @@
-# Build pattern, gotchas, and verification playbook
-
-## Backend admin-module skeleton
-
-A single new module, not scattered changes across every existing module:
-
-```
-<backend>/src/modules/admin/
-├── admin.module.ts
-├── dto/
-│   ├── admin-<entity>-query.dto.ts   (extends the existing pagination DTO;
-│   │                                   adds search/filter fields per entity)
-│   └── ...
-├── admin-dashboard.controller.ts / admin-dashboard.service.ts
-├── admin-<domain>.controller.ts / admin-<domain>.service.ts   (one pair per
-│                                                                related group
-│                                                                of entities)
-└── ...
-```
-
-Conventions:
-
-- Every controller: class-level auth guard + role guard, e.g.
-  `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles('admin')`, so nothing in
-  this module is reachable without both.
-- Cross-tenant reads inject the relevant models/repositories directly and
-  reuse the existing pagination utility; no need to touch the owner-scoped
-  services just to add a list endpoint.
-- Mutations (block/unblock, moderate, soft-delete) should reuse an existing
-  owner-scoped service method where the guard already permits `admin` and
-  the service bypasses the ownership check for that role. Verify this
-  case-by-case by reading the service, not by assuming consistency: the
-  same codebase can have some entities where admin already bypasses
-  ownership and others where it doesn't.
-- Every list/detail response must match the envelope contract found during
-  research exactly. This is worth a comment at the top of the module
-  reminding future editors what shape is required and why.
-
-## Frontend skeleton
-
-- One `services/<entity>.ts` file per entity: typed query/mutation hooks,
-  a shared `invalidate(queryClient)` helper called by every mutation's
-  `onSuccess`.
-- One `app/.../<entity>/page.tsx` per entity: search/filter inputs, a
-  generic reusable data-table component, a create/edit dialog reusing the
-  same dialog shape across the whole panel (one field per `useState`, an
-  effect that seeds fields from the entity being edited, a mutation call in
-  `handleSubmit`, toast on success/error, disable-and-spin the submit button
-  while pending).
-- Sidebar grouped by domain (e.g. "People", "Content", "Finance") rather
-  than one flat list, which makes the IA legible as the entity count grows
-  past half a dozen.
+# Gotchas and the verification playbook
 
 ## Gotchas
 
-**The envelope trap.** An admin list handler that returns a shape adjacent
-to, but not exactly, what the response-wrapping middleware expects will
-often still return HTTP 200 with a body that *looks* plausible, just with
-`meta`/pagination data in the wrong place. This fails silently in the
-frontend (pagination controls just don't work) rather than throwing
-anywhere. Always verify one real endpoint end-to-end (curl + inspect the
-raw JSON) before building the rest on the same pattern.
+**The envelope trap.** An admin list handler returning a shape adjacent to,
+but not exactly, what the response wrapper expects will still return HTTP 200
+with a plausible body, just with `meta` in the wrong place. It fails silently
+in the frontend (pagination controls never appear) rather than throwing
+anywhere. Always `curl` one real endpoint and read the raw JSON before building
+the rest on the same pattern.
 
-**CORS for every new origin.** A local dev frontend, a deployed frontend,
-and a preview-deployment domain are three different origins. Backend CORS
-config needs each one added explicitly (or a regex for preview URLs). A
-"works locally, 400/network-error in production" symptom after deploy is
-almost always this, not a code bug. Test with a real preflight/response
-check (`curl -H "Origin: <origin>" <url> | grep -i access-control`), not
-just by eyeballing the config file, since the config might list an origin
-that doesn't match a trailing slash, protocol, or port exactly.
+**Secrets in admin reads.** Covered in `backend-admin-api.md`, repeated here
+because it is the highest-severity item in this document: read the raw JSON of
+a user response and confirm no OTP, reset token, or verification token is in
+it. The UI never shows these fields, so nothing about the working panel reveals
+the leak.
 
-**Dev-server vs. build cache corruption.** Running a production build
-command in the same project directory as a running dev server can wipe out
-the dev server's build artifacts out from under it. The result: the page
-still returns HTTP 200 (it's serving a cached HTML shell), but every JS/CSS
-chunk 404s, so the app never hydrates and appears stuck on a loading
-screen forever. This looks exactly like a broken auth guard. If a
-previously-working local panel suddenly won't get past "Loading…", check
-for 404s on static assets in the browser console before debugging auth
-logic. Kill both processes, clear the build output directory, and restart
-clean.
+**CORS for every new origin.** A local dev frontend, a deployed frontend and a
+preview URL are three different origins, each needing an explicit entry. Test
+with a real preflight rather than eyeballing the config, since a trailing
+slash, protocol or port mismatch fails silently:
 
-**Seed vs. deploy are different operations.** Deploying new backend code
-changes what the server *can* do; it never inserts rows into the database.
-A freshly deployed environment (or a fresh database) has no admin account
-until a seed step runs against that specific database. After a "successful"
-deploy, a login attempt returning "incorrect email or password" is not a
-deploy failure: it means the seed step hasn't run yet against that
-environment. Keep these as visibly separate steps in any deployment
-checklist, and confirm login only after explicitly running the seed.
+```bash
+curl -s -i -X OPTIONS <api>/auth/login \
+  -H 'Origin: http://localhost:3001' \
+  -H 'Access-Control-Request-Method: POST' | grep -i 'access-control\|^HTTP'
+```
 
-**Default-branch CI restrictions.** In this environment, pushing to (or
-opening a PR that would modify) a repository's default branch commonly
-requires the human's own direct action, even for something as
-low-consequence-looking as registering a new CI workflow file so it can be
-manually dispatched. If blocked here, don't retry through alternate paths
-(a fresh branch, a worktree, editing a different file to the same effect).
-That's treated as circumventing the same restriction, not solving a
-different problem. Explain what's needed and hand back one exact command
-for the human to run themselves.
+A **missing `Access-Control-Allow-Origin` in the response is the failure**: 
+the status is still `204`, so checking the status code alone tells you nothing.
+In the browser this presents as a login form that does nothing on submit while
+the endpoint works perfectly under `curl`.
+
+**Dev-server vs. build-cache corruption.** Running a production build in the
+same directory as a running dev server wipes the dev server's artifacts out
+from under it. The page still returns 200 (it serves a cached HTML shell) but
+every JS chunk 404s, so the app never hydrates and sits on "Loading…" forever
+, identical in appearance to a broken auth guard. Before debugging auth, check
+the console for 404s on static assets. Fix: stop both, delete the build output
+directory, restart.
+
+**Moving a panel between directories** leaves absolute paths in the build
+cache. Delete it after any move.
+
+**Seed vs. deploy are different operations.** Deploying changes what the server
+*can* do; it never inserts rows. After a successful deploy, "incorrect email or
+password" means the seed has not run against that environment's database.
+
+**Default-branch CI restrictions.** Pushing to (or opening a PR that modifies)
+a repository's default branch commonly requires the human's own action, even
+for something as innocuous as registering a workflow file. If blocked, do not
+retry through a different branch, a worktree, or an equivalent edit elsewhere,
+that is circumventing the same restriction. Explain what is needed and hand
+back one exact command.
 
 ## Verification playbook
 
-Compiling and typechecking cleanly is necessary, not sufficient. Before
-calling a phase done:
+Compiling cleanly is necessary, not sufficient. Before calling a phase done:
 
-1. **Stand up real local infra.** Read the actual `.env.example` rather
-   than guessing values; if the backend needs a database/cache, run it in
-   a local container rather than trying to fake it out.
-2. **Seed the first admin account** through the backend's own script/flow.
-   A fresh database has zero users: there is no way to log in until this
-   runs, and it's easy to forget since it's outside the normal edit/build
-   loop.
-3. **Drive a real browser.** A curl-only check will report HTTP 200 on the
-   HTML shell even when every JavaScript chunk is 404ing and the app never
-   actually renders; it cannot catch a stuck-loading state. Use Playwright
-   (or equivalent) to:
-   - log in with the seeded credentials and assert the post-login URL,
-   - sweep every page in the sidebar, asserting each one's heading appears
-     and no fullscreen "Loading…" state persists after a short wait,
-   - open at least one detail dialog and confirm it populates,
-   - perform at least one real write through the UI (not just a page load),
-     e.g. toggle a status or save a settings field, and assert the
-     success toast/resulting state change,
-   - log out and confirm the redirect back to the login page,
-   - collect console errors and failed network requests throughout, not
-     just page-load HTTP status, and fail the check if either is non-empty.
-4. **Screenshot the result.** A full-page screenshot of the rendered
-   dashboard is worth more as evidence than any amount of prose describing
-   that it "works."
+1. **Stand up real local infra** from the actual `.env.example`, containerised
+   DB/cache, not mocks. Pick non-default host ports if the machine already runs
+   other projects' containers.
+2. **Seed the first admin account.** Nothing else is reachable until this runs.
+3. **`curl` one list endpoint** and read the raw JSON: pagination in the
+   expected place, no secret fields present.
+4. **Drive a real browser.** The scaffold ships `verify.js`:
 
-A minimal reusable Playwright skeleton for step 3 (adapt selectors/URLs):
+   ```bash
+   ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD='…' \
+     VERIFY_WRITE_EMAIL=staff@example.com npm run verify
+   ```
 
-```js
-const { chromium } = require('playwright');
+   It logs in, sweeps every sidebar page asserting the heading renders and no
+   persistent "Loading…" remains, opens a detail dialog, checks a search
+   empty-state, performs a **real write and then reverses it**, screenshots the
+   dashboard, and logs out, failing on console errors or failed API calls,
+   while reporting benign asset failures separately.
 
-(async () => {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  const consoleErrors = [];
-  const failedRequests = [];
-  page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
-  page.on('requestfailed', (r) => failedRequests.push(r.url()));
-  page.on('response', (r) => {
-    if (r.status() >= 400 && r.url().includes('/api/')) failedRequests.push(`${r.status()} ${r.url()}`);
-  });
+   Warm the routes first (`curl` each page once) or the first run times out
+   while Next compiles on demand, a compile delay, not a failure.
+5. **Confirm the write in the database.** A success toast proves the request
+   returned 200, not that the record changed. Query it, and check the audit log
+   recorded actor, before and after.
+6. **Screenshot the dashboard** as evidence.
 
-  await page.goto(BASE_URL + '/login', { waitUntil: 'networkidle' });
-  await page.fill('#email', ADMIN_EMAIL);
-  await page.fill('#password', ADMIN_PASSWORD);
-  await page.click('button[type="submit"]');
-  await page.waitForURL('**/dashboard', { timeout: 15000 });
+## Verifying your own tests
 
-  for (const [path, heading] of PAGES) {
-    await page.goto(BASE_URL + path, { waitUntil: 'domcontentloaded' });
-    await page.waitForSelector(`h1:has-text("${heading}")`, { timeout: 12000 });
-    await page.waitForTimeout(800);
-    if (await page.locator('text=Loading…').count() > 0) {
-      console.log('STUCK LOADING:', path);
-    }
-  }
+Two of these checks have silently passed while proving nothing. Both are worth
+guarding against explicitly:
 
-  // ...one real mutation through the UI here (fill a form, click submit,
-  // wait for the success toast)...
+- **A test whose fixtures make it vacuous.** Asserting that history is written
+  under the record owner's id passes trivially if the record's owner *is* the
+  admin performing the action. Set up the fixture so the two differ, then
+  assert both directions: right id matches, wrong id does not.
+- **A test whose payload the system ignores.** Posting a webhook with the wrong
+  envelope key means the handler discards it and the assertion "nothing
+  changed" passes for entirely the wrong reason. Confirm the system *received*
+  what you sent, a log line, a state change, anything, before trusting a
+  negative result.
 
-  await page.screenshot({ path: 'dashboard.png', fullPage: true });
-  console.log('console errors:', consoleErrors.length, 'failed requests:', failedRequests.length);
-  await browser.close();
-})();
-```
+When a test passes on the first attempt for something subtle, make it fail on
+purpose once. A check that cannot fail is not a check.
 
-Run this against `localhost` after each phase, and again against the real
-public URL after any deploy. A working local panel proves nothing about
-CORS or environment configuration in production.
+## Pre-ship checklist
+
+Run this before calling a panel done. Each line has failed a real build.
+
+**Security**
+
+- [ ] Raw JSON of a user response contains no OTP, reset, verification or
+      delete token.
+- [ ] Every `populate`/join of a user reference has an explicit field list.
+- [ ] Every admin route is behind both guards, in the right order.
+- [ ] Self-targeting mutations are blocked (no self-block, no self-demote).
+- [ ] Admin-on-admin destructive actions are blocked or deliberately allowed.
+
+**Correctness**
+
+- [ ] One list endpoint verified by reading raw JSON, not just status code.
+- [ ] Pagination works past page 1, and a filter change resets to page 1.
+- [ ] Booleans filter correctly for `false`, not just `true`.
+- [ ] A search term containing a regex metacharacter does not 500.
+- [ ] Sort fields are whitelisted.
+- [ ] Money is grouped by currency; refund signs verified against real rows.
+- [ ] Date series are zero-filled, and the empty case renders an empty state.
+
+**Operability**
+
+- [ ] Seed script is idempotent and has been run twice.
+- [ ] Every mutation writes an audit entry with actor, before and after.
+- [ ] Indexes exist for the fields the panel filters and sorts on.
+- [ ] CORS verified by preflight for every origin that will be used.
+
+**Proof**
+
+- [ ] Browser run passes with zero console errors and zero API failures.
+- [ ] The write it performed was confirmed in the database.
+- [ ] Screenshot captured.

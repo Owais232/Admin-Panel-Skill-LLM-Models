@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens. To rebrand, change the HUE (the first number) of --primary and
+ * --ring in both blocks; everything else is derived neutrals that work against
+ * any hue. `scripts/create-panel.sh --hue <0-360>` does this for you.
+ *
+ * Reference hues: 43 amber · 221 indigo · 160 emerald · 340 rose · 199 sky.
+ */
+@layer base {
+  :root {
+    --background: 220 20% 98%;
+    --foreground: 224 39% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 39% 10%;
+
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 94%;
+    --secondary-foreground: 224 39% 15%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 221 83% 96%;
+    --accent-foreground: 221 83% 33%;
+
+    --brand: 221 83% 53%;
+    --brand-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 89%;
+    --input: 220 13% 89%;
+    --ring: 221 83% 53%;
+
+    --radius: 0.6rem;
+  }
+
+  .dark {
+    --background: 224 39% 7%;
+    --foreground: 220 20% 96%;
+
+    --card: 224 30% 11%;
+    --card-foreground: 220 20% 96%;
+
+    --primary: 221 83% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 224 20% 18%;
+    --secondary-foreground: 220 20% 96%;
+
+    --muted: 224 20% 16%;
+    --muted-foreground: 220 10% 65%;
+
+    --accent: 224 20% 20%;
+    --accent-foreground: 221 83% 75%;
+
+    --brand: 221 83% 60%;
+    --brand-foreground: 0 0% 100%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 224 20% 22%;
+    --input: 224 20% 22%;
+    --ring: 221 83% 60%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+}
