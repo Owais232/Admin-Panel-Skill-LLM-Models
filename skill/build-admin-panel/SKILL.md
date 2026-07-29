@@ -8,156 +8,180 @@ description: >-
   an admin panel like we did for X", or "research this app so we can scope
   an admin panel". Also applies when asked to research an app's frontend/
   mobile + backend codebase specifically to figure out what an admin panel
-  would need to manage.
+  would need to manage, and when adding a new entity/page to an admin panel
+  that was built with this skill.
 ---
 
-Building an admin panel is two distinct jobs done in order: **understand the
-target app deeply enough to know what an admin actually needs to control**,
-then **build and verify it for real**. Skipping straight to code is the
-single biggest source of rework. Almost every hard problem in this kind of
-task (wrong response shape, missing owner-creation semantics, no way to log
-in) is a research gap that surfaces late instead of a coding mistake.
+# Build an admin panel
 
-Work through these six phases in order. Phases 1 and 2 are pure research and
-judgment calls, so do not write implementation code yet. Phases 3 to 6 build,
-verify, and optionally deploy.
+This skill is self-contained. It ships its own production-grade frontend
+scaffold, its own backend drop-in files, and its own verification harness. No
+reference project needs to be supplied. Everything under `assets/` came out of
+a shipped panel and is verified to build and run.
 
-## Phase 1: Research the target app first
+Building an admin panel is two jobs in order: **understand the target app well
+enough to know what an admin actually needs to control**, then **build and
+prove it works**. Skipping to code is the single biggest source of rework.
+Nearly every hard problem here (wrong response shape, a mutation that silently
+ignores the target user, no way to log in at all) is a research gap that
+surfaces late, not a coding mistake.
 
-Before touching a single scoping question, understand the codebase itself.
+## The five things that go wrong every time
 
-1. Identify the shape: monorepo vs. separate frontend/backend repos, mobile
-   app + API, one backend serving multiple clients, etc.
-2. Spawn 1 to 3 parallel Explore agents (read-only) to research the backend and
-   frontend/mobile side in the same pass. Read actual **schemas, DTOs, and
-   guard implementations**, not just a list of controller routes. A route
-   list tells you an endpoint exists; it doesn't tell you it ignores an
-   `ownerId` field, or that a uniqueness index will 409 on the second create,
-   or that a role guard silently excludes admin.
-3. Find the backend's **response envelope and pagination shape** by reading
-   the actual interceptor/response-transform code, not by guessing from
-   convention. This is the single highest-leverage thing to get right early:
-   every admin list endpoint you write has to match it exactly, and a
-   subtly wrong shape (e.g. `{ items, meta }` vs `{ data: { plural, meta } }`)
-   fails silently in the frontend instead of erroring loudly.
-4. Check for sibling reference admin-panel projects the same organization
-   has already built. If one exists, clone its house style (tech stack,
-   folder layout, generic table/dialog components, auth-store shape) instead
-   of inventing a new one. Consistency across admin panels is worth more
-   than a marginally "better" pattern.
+Read these before starting. Each has burned a real build, each is invisible
+until late, and each is cheap to avoid up front.
 
-Full checklist (entities, auth/roles, existing admin capability, hardcoded
-vs. real data, upload dependencies) is in `references/research-and-scope.md`.
-Read it before starting Phase 1 on anything non-trivial.
+1. **The response envelope.** Get it wrong and lists still return HTTP 200 with
+   a plausible body; pagination just silently never works. Read the actual
+   interceptor source, then verify one real endpoint with `curl` before
+   building anything else on the pattern.
+2. **No admin account exists.** A fresh database has zero users. Nothing in the
+   panel is reachable until a seed script runs against *that specific*
+   database. Deploying code never creates rows.
+3. **Secret leakage through admin reads.** Schemas usually mark only `password`
+   as non-selectable. OTPs and reset tokens come back by default, and the panel
+   renders them into the browser's network tab. Only reading raw JSON catches
+   it.
+4. **Mutations that look supported but aren't.** A guard can allow `admin`
+   while the service still hard-codes the owner from the JWT, ignoring any
+   target-user field the DTO accepts. Only the service body reveals this.
+5. **"It compiles" proves nothing.** A page returns 200 while every JS chunk
+   404s and the app never hydrates. Only a real browser catches that.
 
-## Phase 2: Surface scope decisions before building
+## Phase 1: Research the target app
 
-A handful of judgment calls determine the size and shape of the whole
-project. Get these from the user via `AskUserQuestion`. Do not silently
-assume a default for anything on this list, because guessing wrong here
-means throwing away completed work, not just a tweak:
+Do not write implementation code yet.
 
-- **Is a backend change in scope?** Most backends only expose owner/tenant-
-  scoped list endpoints; a real admin panel almost always needs new
-  admin-scoped endpoints. If the user only wants a frontend, say so
-  explicitly and scope down what's possible without backend changes.
-- **Full surface vs. phased core-first?** Enumerate the entities found in
-  Phase 1 and let the user pick breadth before you design pages for all of
-  them.
-- **New standalone panel project, or embedded in the existing repo?**
-- **For every entity that belongs to a user/tenant**: can an admin create a
-  record *for* another user? If so, pick from existing users, or provision
-  a new one inline? (Most backends have zero support for this on day one;
-  it's new logic either way, so it's a real decision, not a technicality.)
-- **File/image uploads**: paste-a-URL for v1, or wire the real upload
-  pipeline now?
-- **Entity-specific side-flows** (e.g. a "venue" that also needs "gates"
-  managed as a separate sub-resource): include now or defer explicitly?
+1. Identify the shape: monorepo vs. separate repos, mobile app + API, one
+   backend serving several clients.
+2. Spawn 1 to 3 parallel read-only Explore agents across backend and
+   frontend/mobile *in the same pass*. Read **schemas, DTOs, guards, and
+   service bodies**. A route list tells you an endpoint exists, not that it
+   ignores `ownerId`, or that a unique index 409s on the second create.
+3. Find the **response envelope and pagination shape** by reading the
+   interceptor, not by inferring from one example response. Highest-leverage
+   thing to get right, and the cheapest to get wrong.
+4. Note what admin capability already exists. A `role: 'admin'` enum value with
+   no endpoints behind it is common and means you are building the first admin
+   surface from scratch, which changes scope expectations.
 
-The reasoning behind each of these, plus the exact question wording that
-works well, is in `references/research-and-scope.md`.
+Full checklist in `references/research-and-scope.md`. Read it before Phase 1 on
+anything non-trivial.
 
-## Phase 3: Design the plan
+## Phase 2: Surface scope decisions
 
-With research and scope answers in hand:
+A handful of judgment calls set the size of the whole project. Get them from
+the user with `AskUserQuestion`. Guessing wrong here means discarding
+finished work, not adjusting it:
 
-- Confirm the envelope contract one more time against real code (Phase 1
-  step 3) before writing a single admin endpoint.
-- Backend: usually one new admin module with per-domain controllers under
-  `/admin/*`, reusing existing services/repositories for validation and
-  business rules rather than re-implementing them. Cross-tenant list/detail
-  endpoints are the main new surface; mutations often can reuse existing
-  owner-scoped endpoints if the guard already allows `admin` and bypasses
-  the ownership check for that role (check case by case: some do, some
-  don't, and it's inconsistent even within one codebase).
-- Frontend: sidebar grouped by domain, one service-hook file + one page per
-  entity, built on a single reused generic table/dialog convention.
-- Write a **phased delivery plan**, not one giant PR:
-  - Phase 0, backend prep: guard cleanups, and critically, a script to
-    **seed the very first admin account**. This is the thing everyone
-    forgets until the end, and nothing else in the panel is testable
-    without it.
-  - Phase 1, auth + dashboard + one core module (e.g. users), fully built
-    and verified end-to-end before continuing. This catches integration
-    mistakes (wrong envelope shape, CORS, auth flow) while there's only one
-    module to debug, not ten.
-  - Phase 2+, one feature domain per phase, each independently verifiable.
+- **Are backend changes in scope?** Almost always required: most backends only
+  expose owner-scoped lists. If the user wants frontend-only, say plainly that
+  the panel can then only show what one admin's own account can already see.
+- **Full coverage or phased core-first?** Enumerate the entities found in
+  Phase 1 so they choose from a concrete list.
+- **Standalone panel or embedded in the existing repo?**
+- **For every user-owned entity: can an admin act on behalf of another user?**
+  Pick an existing user, or provision one inline?
+- **File/image uploads**: paste-a-URL for v1, or wire the real pipeline now?
+- **Sub-resources** (gates under a venue, variants under a product): include or
+  explicitly defer?
+
+Wording and reasoning for each: `references/research-and-scope.md`.
+
+## Phase 3: Plan, then scaffold
+
+Write a **phased delivery plan**, not one large change:
+
+- **Phase 0, backend prep:** Guards, and the admin seed script.
+- **Phase 1, auth + dashboard + one core entity:** verified end to end before
+  anything else. This catches envelope/CORS/auth mistakes while there is only
+  one module to debug.
+- **Phase 2 onward, one domain per phase:** each independently verifiable.
+
+Then scaffold the frontend:
+
+```bash
+scripts/create-panel.sh --dest <path> --name "Acme" --hue 160 \
+                        --api http://localhost:4000 --install
+```
+
+This produces a complete, typechecking Next.js 15 panel: axios with a
+single-flight 401-refresh queue, persisted auth store with a hydration flag,
+app shell, login, dashboard, a worked entity page to clone, and `verify.js`.
+Stack and conventions: `references/stack-and-conventions.md`.
+
+Immediately after scaffolding, in this order:
+
+1. Fix `ApiEnvelope` in `src/types/index.ts` and the unwrap helpers in
+   `src/lib/api.ts` against the real interceptor.
+2. Fix the login field in `src/services/auth.ts` (`email` vs `identifier`).
+3. Point `NEXT_PUBLIC_API_URL` at the backend and add the panel's origin to
+   backend CORS.
+
+Backend work goes in one new `src/modules/admin/` module reusing existing
+services and repositories. Drop-in files and the full API pattern:
+`references/backend-admin-api.md`. The bundled backend files are NestJS +
+Mongoose; if the target is Django, Rails, Laravel or Express, read
+`references/other-stacks.md` for the concept map. The frontend scaffold is
+unaffected either way.
 
 ## Phase 4: Build phase by phase
 
-- After each phase, typecheck/build **both** sides before moving to the
-  next one. Don't let type errors accumulate across phases.
-- Known trap: running a production build (`next build`, etc.) in the same
-  directory as a live dev server can silently corrupt the dev server's
-  build cache. The symptom looks exactly like a broken auth guard (page
-  stuck on "Loading…" forever) but is actually every JS chunk 404ing. Stop
-  the dev server before building, or use a separate checkout.
+Add entities by cloning the worked trio: service hooks, page, detail dialog.
+Recipes, conventions and the per-entity checklist:
+`references/frontend-recipes.md`.
 
-## Phase 5: Verify for real, not just "it compiles"
+Ship mutations in ascending order of risk: reversible flags first
+(verify/block), then counters and money, then anything an upstream process can
+overwrite. Typecheck **both** sides after each phase; do not let errors
+accumulate.
 
-A clean typecheck and a clean build are necessary and not remotely
-sufficient. Before calling anything done:
+## Phase 5: Verify for real
 
-- Stand up whatever local infra the backend needs (containerized DB/cache,
-  etc.) rather than guessing env values. Read the actual `.env.example`.
-- Run the seed script to create the first admin account. A fresh database
-  has zero users; no login is possible until this runs, and this is easy to
-  forget since it's a one-time step outside the normal build/test loop.
-- Drive an **actual browser** (Playwright or equivalent) through: login,
-  every page in the sidebar, opening at least one detail dialog, performing
-  at least one real write through the UI (not just a GET), and logout.
-  Check console errors and failed network requests, not just HTTP status:
-  a page can return 200 while every asset on it 404s.
-- Take a full-page screenshot of the working dashboard as visual proof.
+A clean typecheck and a clean build are necessary and nowhere near sufficient.
 
-The exact verification-script pattern and the full gotcha list (envelope
-trap, CORS, build-cache corruption, and others) are in
+1. Stand up real local infra (containerised DB/cache) from the actual
+   `.env.example` rather than guessing values.
+2. **Run the admin seed script.**
+3. `curl` one list endpoint and read the **raw JSON**: pagination in the right
+   place, and no token/OTP fields anywhere in the payload.
+4. Drive a real browser: `ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run verify`.
+   It logs in, sweeps every sidebar page, opens a detail dialog, performs
+   **one real write**, and logs out, failing on console errors or failed API
+   calls.
+5. Confirm the write landed in the database, not just that a toast appeared.
+
+Gotcha list, the pre-ship checklist, and verification detail:
 `references/build-and-verify.md`.
 
 ## Phase 6: Deploy, if asked
 
-- Reuse the app's existing CI/CD rather than inventing a new pipeline.
-- Pushing to a non-default branch is usually unrestricted; writing to or
-  merging into the repository's **default branch** commonly requires the
-  human's own direct action in this environment. If blocked here, don't
-  spend cycles hunting for a workaround. Explain clearly and hand back one
-  crisp command for the user to run themselves.
-- CORS almost always needs an explicit backend change for a newly deployed
-  frontend origin. Don't assume the existing config already allows it.
-- **Seeding a live admin account is a separate step from deploying code.**
-  Deploying new code never creates database rows. This is the most common
-  point of confusion after a "successful" deploy: login still fails with
-  "incorrect email or password" until the seed step runs against that
-  specific environment's database.
-- After deploying the frontend, re-run the full Playwright verification
-  against the real public URL. A working local panel proves nothing about
-  CORS or env config in production.
+Reuse the app's existing CI/CD. CORS needs the new origin explicitly. **Seeding
+is a separate step from deploying.** New code never creates rows, so a login
+failure after a "successful" deploy usually means the seed has not run against
+that environment. Re-run the browser verification against the real URL.
+
+Details, including default-branch restrictions: `references/deploy.md`.
 
 ## Reference files
 
-- **`references/research-and-scope.md`**: full discovery checklist (what to
-  read in the backend and frontend/mobile) and the standard scoping
-  questions with the reasoning behind each.
-- **`references/build-and-verify.md`**: the phased build pattern in more
-  detail, the full gotcha list, and a reusable Playwright verification
-  script skeleton.
+- **`references/research-and-scope.md`**: discovery checklist and the standard
+  scoping questions with reasoning.
+- **`references/stack-and-conventions.md`**: the canonical stack, what each
+  scaffolded file does, and the house conventions to follow.
+- **`references/backend-admin-api.md`**: admin module layout, security
+  projection, query/filter safety, stats aggregation, mutation patterns.
+- **`references/frontend-recipes.md`**: adding an entity, dialogs, filters,
+  charts, and the per-entity checklist.
+- **`references/build-and-verify.md`**: the full gotcha list and the
+  verification playbook.
+- **`references/other-stacks.md`**: what changes when the backend is not
+  NestJS + Mongo (Django, Rails, Laravel, Express + Prisma).
+- **`references/deploy.md`**: deployment, CORS, seeding a live environment.
+
+## Assets
+
+- **`assets/frontend/`**: the complete panel template. Runs and builds as-is.
+- **`assets/backend/nest/`**: guards, decorators, safe projection, audit log,
+  and the admin seed script. See its README for wiring order.
+- **`scripts/create-panel.sh`**: scaffolds and rebrands a new panel.

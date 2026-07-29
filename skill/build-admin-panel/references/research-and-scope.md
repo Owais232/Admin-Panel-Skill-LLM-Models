@@ -1,156 +1,119 @@
-# Research checklist + standard scoping questions
+# Research checklist and scoping questions
 
 ## What to read in the backend
 
-Don't stop at a route/controller listing. For each entity the admin panel
-might need to manage, read:
+Do not stop at a route/controller listing. For every entity the panel might
+manage, read:
 
-- **The schema/model file itself:** every field, which are required,
-  which have uniqueness constraints (e.g. "one active venue per owner" via a
-  partial unique index), which reference other collections (taxonomy/
-  category tables, other entities), which fields are system-managed and
-  never client-settable (ratings, counters, soft-delete flags).
-- **The create/update DTOs:** exact validators, not just field names. A
-  field being "optional" in the DTO but required by a downstream business
-  rule (e.g. an image URL required only when a certain status is set) is a
-  common trap.
-- **The controller's guards:** which roles can call each endpoint, and
-  critically, whether an "admin" role is even in the allow-list at all.
-  Backends built for a single-tenant self-service flow (mobile app users
-  managing their own data) frequently have create/update endpoints gated to
-  exactly one non-admin role, with zero path for an admin to act on behalf
-  of another user. Note this as a required backend change rather than
-  assuming it'll "just work" once the frontend calls it.
-- **The service's business logic**, not just the guard: a guard can allow
-  a role while the service still hard-codes `owner: request.user.userId`
-  from the JWT, silently ignoring any "target user" field the DTO accepts.
-  This makes an endpoint *look* like it supports admin-on-behalf-of
-  creation when it actually doesn't. Only reading the service method body
-  reveals this.
-- **The exact response envelope:** read the interceptor/middleware that
-  wraps every response, not just one example endpoint's output. Common
-  shapes: `{ success, data, meta }`, `{ data: { items, meta } }`, a bare
-  array with `X-Total-Count` header, etc. If the wrapper has more than one
-  branch (e.g. "if payload looks like `{items, meta}` do X, else if it looks
-  like `{data, meta}` do Y, else wrap plainly"), figure out which branch
-  your new endpoints need to hit. Getting this wrong produces a response
-  that *parses* fine but silently misplaces `meta`, breaking pagination in
-  the frontend with no error thrown anywhere.
-- **The pagination utility**, if one exists, and reuse it rather than
-  hand-rolling skip/limit math that might not match the frontend's expected
-  `PaginationMeta` shape exactly.
-- **The auth/role system**: how tokens are issued, what a JWT payload
-  contains, whether there's a generic `Roles`/`RolesGuard` decorator pair to
-  reuse for new admin endpoints, and whether any existing modules use an
-  inline `if (user.role !== 'admin') throw ...` check instead of the guard.
-  These are worth normalizing to the guard pattern while you're in there,
-  since it's a small fix that makes every future admin endpoint consistent.
-- **Whether any admin-only capability already exists** in the backend at
-  all (a role that's recognized but has no real endpoints yet is common:
-  it means you're building from scratch, not extending).
+- **The schema itself**: every field; which are required; which carry
+  uniqueness constraints (including *partial* unique indexes, e.g. "one active
+  record per owner", which 409 only on the second create); which reference
+  other collections; which are system-managed and never client-settable
+  (counters, ratings, soft-delete flags).
+- **The create/update DTOs**: the validators, not just the field names. A
+  field optional in the DTO but required by a downstream rule (an image URL
+  required only once status is `published`) is a standard trap.
+- **The controller's guards**: which roles can call each endpoint, and whether
+  `admin` is in the allow-list at all. Backends built for a self-service flow
+  routinely gate create/update to exactly one non-admin role, with no path for
+  an admin to act on behalf of anyone. Record this as required backend work
+  rather than assuming it will work once the frontend calls it.
+- **The service body, not just the guard.** A guard can allow `admin` while the
+  service still hard-codes `owner: request.user.userId` from the JWT, silently
+  ignoring any target-user field the DTO accepts. The endpoint *looks* like it
+  supports admin-on-behalf-of creation and does not. Only the method body shows
+  this.
+- **The response envelope**: the interceptor source, not one example
+  response. If it branches on the returned shape, work out which branch your
+  new endpoints must hit. Getting this wrong yields a response that parses fine
+  and misplaces `meta`, breaking pagination with no error anywhere.
+- **The pagination utility**, and reuse it rather than hand-rolling skip/limit
+  that may not match the expected meta shape.
+- **The auth system**: how tokens are issued, what the JWT payload holds,
+  whether a `Roles`/`RolesGuard` pair already exists to reuse, and whether any
+  module uses an inline `if (user.role !== 'admin')` check instead. Those are
+  worth normalising to the guard while you are in there, but check each one
+  before enabling it. An inline check that is currently *commented out* is
+  load-bearing: turning it on can 403 a client that depends on the endpoint
+  being open.
+- **Whether the refresh-token collection is unique per user**: that decides
+  whether an admin can use the panel and the mobile app with one account.
+- **Which indexes exist.** Usually none that match admin filters, because the
+  app only ever queried by owner.
 
 ## What to read in the frontend/mobile app
 
-- Which entities are backed by real API calls vs. still hardcoded local
-  arrays/mock data: the admin panel should manage the real backend
-  entities, not the mock shapes, even if the mocks are more convenient to
-  read first as a rough field-list orientation.
-- The **creation flows** for entities the admin will need to create or
-  edit, especially multi-step ones. A profile-style entity (e.g. a venue,
-  a vendor, a listing) is often created across several screens with a
-  client-side draft, and the *final* submit step may fire more than one API
-  call (e.g. create the parent entity, then loop over a sub-resource array
-  making N follow-up calls). If the admin panel only calls the "create
-  parent" endpoint, it will silently produce incomplete records. Flag this
-  explicitly rather than assuming one endpoint covers a mobile flow that
-  visibly spans several screens.
-- Any **invite/onboarding flow**: check exactly what it provisions. It's
-  common for an "invite user" flow to create a bare user record with a role
-  set, but never the actual profile/entity document, so the invited user
-  still has to complete their own onboarding after accepting. Don't assume
-  accepting an invite finishes the job.
-- Whether every role that needs a profile entity is actually **invitable**
-  at all: invite systems are often built incrementally and can be missing
-  a role (e.g. three of four provider types are invitable, the fourth isn't
-  yet) purely because nobody needed it until now.
-- Any existing admin remnants: a role enum that includes "admin" with zero
-  UI anywhere referencing it is a strong signal you're building the first
-  admin surface from scratch, which matters for scope-setting expectations.
-- File/image upload dependency: if a required field is a hosted URL
-  (rather than an arbitrary string), the admin panel's create/edit form
-  needs either a working upload pipeline or a URL-paste fallback before
-  submission can succeed at all; note which fields are actually required
-  vs. optional.
+- Which entities are backed by real API calls vs. still hardcoded mock arrays.
+  The panel manages the real backend entities; mocks are useful only as a rough
+  field-list orientation.
+- **Creation flows**, especially multi-step ones. A profile-style entity is
+  often created across several screens with a client-side draft, and the final
+  submit may fire more than one call (create parent, then N sub-resource
+  calls). A panel that calls only the parent endpoint produces silently
+  incomplete records.
+- **Invite/onboarding flows**: check what they actually provision. "Invite
+  user" commonly creates a bare user with a role and no profile document; the
+  invitee still has to complete onboarding. Also check every role that needs a
+  profile is invitable at all, invite systems are built incrementally and
+  routinely miss one.
+- **Upload dependencies**: if a required field is a hosted URL rather than an
+  arbitrary string, the panel's form needs a working upload path or a URL-paste
+  fallback before submission can succeed at all.
+- **Admin remnants**: an `admin` role with zero UI referencing it means you
+  are building the first admin surface from scratch, which sets expectations.
+- **Dead files that are actually data.** A large unreferenced JSON in the repo
+  is often a full upstream catalog that a seeder trimmed. Worth checking before
+  building a manual data-entry screen for something already sitting on disk.
 
-## Finding and evaluating sibling reference templates
+## Scoping questions (via AskUserQuestion)
 
-If the organization has built other admin panels before, look for them as
-sibling directories/repos. Worth cloning if they share:
+Ask these once Phase 1 research is done, before designing anything. Each
+materially changes scope; none should be defaulted silently.
 
-- The same broad stack (framework, UI library, data-fetching approach).
-- A generic data-table component, a generic form-dialog convention, and a
-  persisted-auth-store pattern that's already solved the "block writing the
-  same auth interceptor from scratch" problem (token refresh queuing,
-  401-retry, etc.).
+1. **"Backend changes in scope, or frontend-only?"**
+   Almost every backend built for a self-service app has only owner-scoped
+   lists. If the user says frontend-only, the honest answer is "then the panel
+   can only show what one admin's own account already sees", say that plainly
+   rather than quietly building against endpoints that do not exist.
 
-If found, clone the richer/more complete one as the skeleton, strip its
-domain-specific pages/services down to the auth+layout scaffolding, and
-build the new entities on top of the same conventions. This keeps the
-whole organization's admin panels feeling like one family rather than N
-independent one-offs.
-
-## Standard scoping questions to ask (via AskUserQuestion)
-
-Ask these together once Phase 1 research is done, before designing
-anything. Each one materially changes scope, so don't default silently.
-
-1. **"Should backend changes be in scope, or frontend-only?"**
-   Reasoning: almost every backend built for a self-service app only has
-   owner-scoped list endpoints. A real admin panel needs cross-tenant
-   list/detail endpoints that don't exist yet. If the user says
-   frontend-only, the honest answer is "then the panel can only show what
-   each admin's own account can already see." Say that plainly rather than
-   quietly building against endpoints that don't exist.
-
-2. **"Full coverage of every entity, or a phased/core-first subset?"**
-   Reasoning: enumerate every entity discovered in Phase 1 so the user is
-   choosing from a concrete list, not an abstract "everything." Recommend
-   phased-with-core-first as the default (dashboard + user management first,
-   since nothing else is useful without them) but let the user pick breadth.
+2. **"Full coverage, or phased core-first?"**
+   Enumerate every entity found in Phase 1 so they choose from a concrete list.
+   Recommend phased with users + dashboard first, since nothing else is useful
+   without them.
 
 3. **"New standalone project, or embedded in the existing repo?"**
-   Reasoning: matters for deployment topology, CI/CD reuse, and whether a
-   sibling reference template's project layout should be cloned wholesale
-   (favors standalone) vs. merged into existing tooling (favors embedded).
+   Affects deployment topology and CI reuse. Standalone is the default here,
+   the scaffold is a complete project.
 
-4. **For any entity that belongs to a user/tenant: "Can an admin create a
-   record for another user, and if so, how is the owner chosen?"**
-   Reasoning: this is new backend logic in the overwhelming majority of
-   codebases (see the research checklist above; even endpoints that
-   technically allow an admin role often ignore any owner-override field).
-   Present the real options concretely: (a) admin picks from existing users
-   who already have the right role, via search (the smallest new-logic
-   footprint); (b) admin can also provision a brand-new user inline (bigger
-   scope: usually means wiring the invite system in, plus checking every
-   needed role is actually invitable).
+4. **For any user-owned entity: "Can an admin create a record for another
+   user, and how is the owner chosen?"**
+   This is new backend logic in the overwhelming majority of codebases. Offer
+   concrete options: (a) pick from existing users with the right role, via
+   search, smallest footprint; (b) provision a new user inline, bigger, and
+   usually means wiring in the invite system.
 
-5. **"How should image/file uploads be handled in create/edit forms?"**
-   Reasoning: real upload pipelines (presigned URLs, S3, etc.) are usually
-   already built for the mobile/web client and can be reused, but wiring
-   them into a new admin form is real work. A plain URL-paste input is a
-   legitimate, much smaller v1 that unblocks everything else. Offer both
-   explicitly rather than assuming the richer option by default.
+5. **"How are image/file uploads handled in create/edit forms?"**
+   The real pipeline usually exists for the mobile client and can be reused,
+   but wiring it into a new form is real work. A URL-paste input is a
+   legitimate v1 that unblocks everything else. Offer both.
 
-6. **For any entity with a side-flow sub-resource discovered in Phase 1
-   (e.g. "gates" under a "venue", "variants" under a "product"): "Include
-   this sub-resource's management now, or defer it?"**
-   Reasoning: a summary field on the parent (e.g. `numberOfGates`) is
-   often just a number typed by the original creator with zero
-   enforcement against actual sub-resource records. Creating the parent
-   alone from the admin panel will produce a technically-valid-but-hollow
-   record unless the sub-resource is handled too. Surface this explicitly
-   so the user can choose to include it or knowingly defer it.
+6. **For any sub-resource found in Phase 1: "Manage it now, or defer?"**
+   A summary field on the parent (`numberOfGates`) is often a number someone
+   typed with no enforcement against actual sub-records. Creating the parent
+   alone from the panel produces a valid-but-hollow record. Surface it so the
+   deferral is a decision rather than an oversight.
 
-7. **If a needed role turns out not to be invitable yet (see research
-   checklist): "Should we add it as an invitable role (usually a small,
-   low-risk backend change), or is that out of scope for now?"**
+7. **If a needed role turns out not to be invitable: "Add it as an invitable
+   role (usually small and low-risk), or out of scope?"**
+
+## Confirm the bug before fixing it
+
+When the request arrives as a list of reported problems rather than a feature,
+reproduce each one against the real system before planning any fix. Reports
+routinely mis-describe the cause: "the dropdown is blank" turned out to be
+16 of 24 records having no image at all, plus a renderer that could not display
+the format the other 8 used. Fixing the reported symptom would have addressed
+neither.
+
+State plainly which reported issues you confirmed, which you could not
+reproduce, and what the actual cause was, before proposing the fix.
