@@ -1,5 +1,9 @@
 # Build pattern, gotchas, and verification playbook
 
+For an existing-panel redesign, preserve the current architecture and use
+these skeletons only where new capabilities need them. Reuse accounts and
+components; seeding or new admin endpoints are not automatic redesign steps.
+
 ## Backend admin-module skeleton
 
 A single new module, not scattered changes across every existing module:
@@ -51,6 +55,39 @@ Conventions:
   than one flat list, which makes the IA legible as the entity count grows
   past half a dozen.
 
+## Redesign acceptance and verification evidence
+
+Capture before/after or concept/render screenshots of the dashboard and a
+representative complex module on desktop and mobile. Agree on the relevant
+screens and viewports, carrying forward choices already supplied by the user.
+Check observable criteria rather than an unexplained numerical fidelity score:
+
+- Requested sections and role-specific controls remain reachable.
+- Hierarchy, typography, palette, spacing, and repeated controls follow the
+  agreed visual reference; primary content is legible and not clipped.
+- Keyboard focus, labels, and mobile navigation work; wide tables scroll
+  within their container without page overflow or broken control text.
+- Affected loading/empty/error, pagination, upload, version-conflict,
+  unsaved-change, and save/publication behavior is preserved.
+
+Reconcile generated concepts with the actual API before coding. Record
+intentional functional differences, including omitted controls or unsupported
+metrics. Fix concrete mismatches and repeat affected checks, rather than
+iterating indefinitely toward a subjective score.
+
+| Verification level | Claim supported |
+| --- | --- |
+| Types/build/unit tests | Compilation and the tested logic; not rendered UI or connectivity. |
+| Browser with fixtures | Frontend behavior for controlled responses, including simulated writes. |
+| Browser with live test backend/database | Exercised authentication, authorization, requests, and persisted rereads. |
+| Deployed browser-to-API-to-data flow | The exercised deployment/account/workflow; not untested roles or modules. |
+
+Report environments, roles/viewports, outcomes, screenshot evidence, and
+remaining integration gaps. A live login failure does not invalidate passing
+fixture checks, but it leaves live authentication and persistence unverified.
+For live writes, confirm persistence by rereading from the backend within the
+authorized test scope. Do not reset production data to complete a redesign check.
+
 ## Gotchas
 
 **The envelope trap.** An admin list handler that returns a shape adjacent
@@ -90,15 +127,11 @@ deploy failure: it means the seed step hasn't run yet against that
 environment. Keep these as visibly separate steps in any deployment
 checklist, and confirm login only after explicitly running the seed.
 
-**Default-branch CI restrictions.** In this environment, pushing to (or
-opening a PR that would modify) a repository's default branch commonly
-requires the human's own direct action, even for something as
-low-consequence-looking as registering a new CI workflow file so it can be
-manually dispatched. If blocked here, don't retry through alternate paths
-(a fresh branch, a worktree, editing a different file to the same effect).
-That's treated as circumventing the same restriction, not solving a
-different problem. Explain what's needed and hand back one exact command
-for the human to run themselves.
+**Git permissions.** Follow the actual repository/tool restrictions and
+existing user authorization. Opening a PR does not write to the default
+branch, and PR authorization does not authorize merging or deployment.
+Do not assume a universal human-only rule or ask again for authorization
+already granted. Report actual denials without trying alternate workarounds.
 
 ## Verification playbook
 
@@ -108,10 +141,10 @@ calling a phase done:
 1. **Stand up real local infra.** Read the actual `.env.example` rather
    than guessing values; if the backend needs a database/cache, run it in
    a local container rather than trying to fake it out.
-2. **Seed the first admin account** through the backend's own script/flow.
-   A fresh database has zero users: there is no way to log in until this
-   runs, and it's easy to forget since it's outside the normal edit/build
-   loop.
+2. **Confirm a working account.** Reuse an existing test account, or seed
+   the first admin through the backend's own flow if the environment needs
+   one and the action is authorized. Keep live provisioning separate from
+   routine redesign verification.
 3. **Drive a real browser.** A curl-only check will report HTTP 200 on the
    HTML shell even when every JavaScript chunk is 404ing and the app never
    actually renders; it cannot catch a stuck-loading state. Use Playwright

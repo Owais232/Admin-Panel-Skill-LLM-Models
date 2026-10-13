@@ -1,5 +1,23 @@
 # Research checklist + standard scoping questions
 
+## Existing-panel redesigns
+
+Start with screenshots of the current dashboard, a representative complex
+module, and a mobile view. Record role, viewport, and live vs. demo data;
+label missing evidence when access is unavailable. Inspect their components,
+API clients, shared primitives, and navigation before proposing a direction.
+
+Trace affected workflows and contracts: tenant/role boundaries, pagination,
+field units/timezones, uploads, unsaved-change guards, version conflicts,
+and draft/publication behavior. Expand backend research when an affected
+workflow or proposed behavior exposes a concrete gap. The full checklist
+below remains appropriate for new capabilities and broader investigations.
+
+Ask only unresolved decisions about screen coverage, visual direction, and
+whether concrete gaps may justify backend changes. Existing embedded panels
+with working auth and uploads do not need new standalone/provisioning/upload
+choices unless those capabilities are part of the requested change.
+
 ## What to read in the backend
 
 Don't stop at a route/controller listing. For each entity the admin panel
@@ -93,7 +111,7 @@ sibling directories/repos. Worth cloning if they share:
   same auth interceptor from scratch" problem (token refresh queuing,
   401-retry, etc.).
 
-If found, clone the richer/more complete one as the skeleton, strip its
+For a new standalone panel, clone a suitable one as the skeleton, strip its
 domain-specific pages/services down to the auth+layout scaffolding, and
 build the new entities on top of the same conventions. This keeps the
 whole organization's admin panels feeling like one family rather than N
@@ -101,16 +119,15 @@ independent one-offs.
 
 ## Standard scoping questions to ask (via AskUserQuestion)
 
-Ask these together once Phase 1 research is done, before designing
-anything. Each one materially changes scope, so don't default silently.
+Ask the applicable, unresolved questions together once Phase 1 research is
+done, before designing anything. Carry forward the user's existing choices;
+use the redesign questions above when preserving an existing panel.
 
 1. **"Should backend changes be in scope, or frontend-only?"**
-   Reasoning: almost every backend built for a self-service app only has
-   owner-scoped list endpoints. A real admin panel needs cross-tenant
-   list/detail endpoints that don't exist yet. If the user says
-   frontend-only, the honest answer is "then the panel can only show what
-   each admin's own account can already see." Say that plainly rather than
-   quietly building against endpoints that don't exist.
+   Reasoning: platform-wide administration may need cross-tenant endpoints,
+   while a tenant panel may be served by existing owner-scoped endpoints.
+   For frontend-only work, explain any discovered capability gaps rather
+   than building against endpoints that do not exist.
 
 2. **"Full coverage of every entity, or a phased/core-first subset?"**
    Reasoning: enumerate every entity discovered in Phase 1 so the user is
