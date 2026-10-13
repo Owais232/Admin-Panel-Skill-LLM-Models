@@ -64,6 +64,11 @@ reusable methodology in [`skill/build-admin-panel/`](skill/build-admin-panel/SKI
 Same process, any stack: hand it a different app and it builds the same
 way.
 
+For an existing-panel redesign, the same six phases focus on current
+screens and affected contracts, preserving working auth, uploads, and roles.
+The verification guide includes visual acceptance criteria and distinguishes
+fixture-based checks from live integration and deployed verification.
+
 ## Using the skill
 
 The reusable methodology lives in
@@ -76,7 +81,7 @@ directory:
 - **Claude Code (per-project):** copy it into `.claude/skills/build-admin-panel/`
 
 Once installed, the skill activates on its own whenever you ask the agent to
-build, add, or scope an admin panel, dashboard, backoffice, or CMS for an
+build, add, scope, or redesign an admin panel, dashboard, backoffice, or CMS for an
 existing app. You can also point it at a codebase first ("research this app
 so we can scope an admin panel") to run just the research and scoping phases.
 

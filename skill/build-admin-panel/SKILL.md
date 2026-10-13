@@ -1,7 +1,7 @@
 ---
 name: build-admin-panel
 description: >-
-  This skill should be used when the user asks to build, add, or scope an
+  This skill should be used when the user asks to build, add, scope, or redesign an
   admin panel, admin dashboard, backoffice, or CMS for an existing app or
   platform, e.g. "build an admin panel for this app", "we need a dashboard
   to manage users and orders", "add a backoffice for the backend", "create
@@ -22,14 +22,21 @@ Work through these six phases in order. Phases 1 and 2 are pure research and
 judgment calls, so do not write implementation code yet. Phases 3 to 6 build,
 verify, and optionally deploy.
 
+For an **existing-panel redesign**, preserve working contracts, roles,
+uploads, auth, and project structure unless the requested change requires
+otherwise. A tenant dashboard does not imply platform-wide administration.
+Follow the same phases with research and checks focused on the affected
+screens; see the redesign guidance in `references/research-and-scope.md`.
+
 ## Phase 1: Research the target app first
 
 Before touching a single scoping question, understand the codebase itself.
 
 1. Identify the shape: monorepo vs. separate frontend/backend repos, mobile
    app + API, one backend serving multiple clients, etc.
-2. Spawn 1 to 3 parallel Explore agents (read-only) to research the backend and
-   frontend/mobile side in the same pass. Read actual **schemas, DTOs, and
+2. For broad investigations, use 1 to 3 parallel Explore agents (read-only)
+   when available and authorized; a narrow redesign can use direct inspection
+   of the affected screens and contracts. Read actual **schemas, DTOs, and
    guard implementations**, not just a list of controller routes. A route
    list tells you an endpoint exists; it doesn't tell you it ignores an
    `ownerId` field, or that a uniqueness index will 409 on the second create,
@@ -53,14 +60,15 @@ Read it before starting Phase 1 on anything non-trivial.
 ## Phase 2: Surface scope decisions before building
 
 A handful of judgment calls determine the size and shape of the whole
-project. Get these from the user via `AskUserQuestion`. Do not silently
-assume a default for anything on this list, because guessing wrong here
-means throwing away completed work, not just a tweak:
+project. Use the request and prior answers first; ask only unresolved
+questions that materially affect scope, via `AskUserQuestion` or the runtime's
+equivalent. For redesigns, resolve screen coverage, visual direction, and
+backend scope; retain existing choices for auth, uploads, and placement.
+Guessing wrong can mean throwing away completed work, not just a tweak:
 
-- **Is a backend change in scope?** Most backends only expose owner/tenant-
-  scoped list endpoints; a real admin panel almost always needs new
-  admin-scoped endpoints. If the user only wants a frontend, say so
-  explicitly and scope down what's possible without backend changes.
+- **Is a backend change in scope?** Platform-wide administration may need
+  new cross-tenant endpoints; a tenant panel may already have what it needs.
+  If the user only wants a frontend, scope it to existing capabilities.
 - **Full surface vs. phased core-first?** Enumerate the entities found in
   Phase 1 and let the user pick breadth before you design pages for all of
   them.
@@ -83,8 +91,9 @@ With research and scope answers in hand:
 
 - Confirm the envelope contract one more time against real code (Phase 1
   step 3) before writing a single admin endpoint.
-- Backend: usually one new admin module with per-domain controllers under
-  `/admin/*`, reusing existing services/repositories for validation and
+- Backend for new platform administration: usually one module with
+  per-domain controllers under `/admin/*`, reusing existing services/repositories
+  for validation and
   business rules rather than re-implementing them. Cross-tenant list/detail
   endpoints are the main new surface; mutations often can reuse existing
   owner-scoped endpoints if the guard already allows `admin` and bypasses
@@ -103,10 +112,15 @@ With research and scope answers in hand:
     module to debug, not ten.
   - Phase 2+, one feature domain per phase, each independently verifiable.
 
+For a redesign, adapt this plan to the existing shell, dashboard, and module
+families. Reuse working accounts and flows instead of adding an admin seed
+or new endpoints by default. Reconcile visual concepts with actual API
+capabilities before coding; do not introduce unsupported metrics or actions.
+
 ## Phase 4: Build phase by phase
 
-- After each phase, typecheck/build **both** sides before moving to the
-  next one. Don't let type errors accumulate across phases.
+- After each phase, typecheck/build the affected applications; include both
+  sides when backend code or contracts change. Don't let type errors accumulate.
 - Known trap: running a production build (`next build`, etc.) in the same
   directory as a live dev server can silently corrupt the dev server's
   build cache. The symptom looks exactly like a broken auth guard (page
@@ -120,15 +134,21 @@ sufficient. Before calling anything done:
 
 - Stand up whatever local infra the backend needs (containerized DB/cache,
   etc.) rather than guessing env values. Read the actual `.env.example`.
-- Run the seed script to create the first admin account. A fresh database
-  has zero users; no login is possible until this runs, and this is easy to
-  forget since it's a one-time step outside the normal build/test loop.
+- Reuse an existing test account, or run the first-admin seed when the
+  selected environment needs it and the action is authorized. Do not reseed
+  an existing production database as a routine redesign check.
 - Drive an **actual browser** (Playwright or equivalent) through: login,
   every page in the sidebar, opening at least one detail dialog, performing
   at least one real write through the UI (not just a GET), and logout.
   Check console errors and failed network requests, not just HTTP status:
   a page can return 200 while every asset on it 404s.
 - Take a full-page screenshot of the working dashboard as visual proof.
+  For redesigns, also inspect a complex module and a mobile view against the
+  agreed reference and the acceptance criteria in the verification guide.
+
+Report which checks used fixtures, a live test backend/database, or a deployed
+environment. A mocked save does not prove persistence. If live access fails,
+complete independent checks and state which integration claims remain unverified.
 
 The exact verification-script pattern and the full gotcha list (envelope
 trap, CORS, build-cache corruption, and others) are in
@@ -137,11 +157,10 @@ trap, CORS, build-cache corruption, and others) are in
 ## Phase 6: Deploy, if asked
 
 - Reuse the app's existing CI/CD rather than inventing a new pipeline.
-- Pushing to a non-default branch is usually unrestricted; writing to or
-  merging into the repository's **default branch** commonly requires the
-  human's own direct action in this environment. If blocked here, don't
-  spend cycles hunting for a workaround. Explain clearly and hand back one
-  crisp command for the user to run themselves.
+- Follow actual Git permissions, branch conventions, and the user's existing
+  authorization. Opening a PR does not itself write to the default branch;
+  permission to open one does not imply merge/deploy permission. If an action
+  is blocked, report the real restriction without seeking a workaround.
 - CORS almost always needs an explicit backend change for a newly deployed
   frontend origin. Don't assume the existing config already allows it.
 - **Seeding a live admin account is a separate step from deploying code.**
